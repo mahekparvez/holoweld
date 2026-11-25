@@ -6,6 +6,7 @@ import {Station,type View} from './scene';
 import {Weld,seamBins} from './weld';
 import {Recorder} from './record';
 import './style.css';
+import type {Extension,ExtensionFactory} from './extension';
 
 const names=['Shoulder pan','Shoulder lift','Elbow flex','Wrist flex','Wrist roll'];
 const rad=180/Math.PI;
@@ -14,7 +15,8 @@ const axisKeys:Record<string,number[]>={ArrowLeft:[-1,0,0],ArrowRight:[1,0,0],Ar
 type Runtime={r:Robot;s:Station;w:Weld;rec:Recorder};
 
 function Mark(){return <span class="mark" aria-hidden="true"><svg width="25" height="25" viewBox="0 0 24 24" fill="none"><path d="M3 4v16m18-16v16M3 12h5m8 0h5M13 3l-4 9h6l-4 9" stroke="currentColor" stroke-width="1.7" stroke-linecap="square"/></svg></span>;}
-function App(){
+function App({enhance}:{enhance?:ExtensionFactory}){
+  const extensionHost=useRef<HTMLDivElement>(null);
   const viewport=useRef<HTMLDivElement>(null);
   const runtime=useRef<Runtime|null>(null);
   const input=useRef({event:'initial',at:Date.now(),value:null as unknown});
@@ -43,6 +45,7 @@ function App(){
     let disposed=false;
     let previous=0,elapsed=0,carry=0;
     let station:Station|undefined;
+    let extension:Extension|undefined;
     const setup=async()=>{
       try{
         const asset=await fetch('/so101/model.json');
@@ -55,8 +58,10 @@ function App(){
         await s.loaded;
         if(disposed)return;
         runtime.current={r,s,w,rec};
+        extension=enhance?.(extensionHost.current!,s,r,w,event);
         setLoading('');
-        s.renderer.setAnimationLoop(now=>{
+        s.renderer.setAnimationLoop((now,frame)=>{
+          extension?.frame?.(frame);
           const dt=previous?Math.max(0,Math.min(.08,(now-previous)/1000)):1/60;previous=now;
           carry+=dt;
           while(carry>=1/60){w.step(1/60);carry-=1/60;}
@@ -64,14 +69,14 @@ function App(){
           elapsed+=dt;
           if(elapsed>=.095){
             elapsed=0;
-            rec.sample(r,w,{lastCommand:input.current},s.renderer.domElement,s.view);
+            rec.sample(r,w,{lastCommand:input.current,extension:extension?.sample?.()},s.renderer.domElement,s.view);
             repaint(n=>n+1);
           }
         });
       }catch(error){setLoading(error instanceof Error?error.message:String(error));}
     };
     void setup();
-    return ()=>{disposed=true;station?.renderer.setAnimationLoop(null);};
+    return ()=>{disposed=true;extension?.close?.();station?.renderer.setAnimationLoop(null);};
   },[]);
   useEffect(()=>{
     const down=(e:KeyboardEvent)=>{
@@ -96,7 +101,7 @@ function App(){
   const reset=()=>{if(!rt)return;rt.r.reset();rt.w.reset();rt.s.shiftClamps(0);setClampOffset(0);setNotice('');event('Reset cell');};
   return <>
     <header class="topbar">
-      <div class="brand"><Mark/><div><b>HOLOWELD</b><span>Stage 1 · Robotic welding simulator</span></div></div>
+      <div class="brand"><Mark/><div><b>HOLOWELD</b><span>{enhance?'Stage 2 · Mixed reality':'Stage 1 · Robotic welding simulator'}</span></div></div>
       <div class="topright"><span class="sim"><i/> Simulation only</span><button class="danger" onClick={stop} disabled={!rt}><span>■</span> E-stop</button></div>
     </header>
     <main>
@@ -167,9 +172,13 @@ function App(){
           <p class="hint">The export includes robot state, input, electrode pose, arc metrics, and the weld trajectory.</p>
         </>}
         </div>
+        {enhance&&<div ref={extensionHost} class="panel"/>}
         <div class="asideBottom"><span role="status" class={r?.stopped||r?.collision?'warning':''}>{notice||w?.status||'Initializing'}</span><button disabled={!rt} onClick={reset}>Reset cell</button></div>
       </aside>
     </main>
   </>;
 }
-render(<App/>,document.getElementById('app')!);
+const root=document.getElementById('app')!;
+if(import.meta.env.MODE==='stage2'){
+  void import('../../stage-2-mixed-reality/xr').then(({attach})=>render(<App enhance={attach}/>,root));
+}else render(<App/>,root);

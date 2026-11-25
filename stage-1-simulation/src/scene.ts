@@ -158,7 +158,7 @@ export class Station {
   }
   resize() {
     const w=this.host.clientWidth,h=this.host.clientHeight;
-    if(!w||!h)return;
+    if(!w||!h||this.renderer.xr.isPresenting)return;
     this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.renderer.setSize(w,h);
   }
   async loadRobot(){
@@ -266,7 +266,7 @@ export class Station {
   }
   render(weld:Weld,dt:number) {
     const r=this.robot;
-    {
+    if(!this.renderer.xr.isPresenting){
       if(this.view==='Orbit')this.orbit.update();
       if(this.view==='Robot'){
         this.camera.position.copy(r.point(p(.035,.033,-.019)));

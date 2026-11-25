@@ -1,0 +1,12 @@
+/Library/
+/Temp/
+/Logs/
+/UserSettings/
+/obj/
+/Builds/
+/Assets/HoloWeldGenerated/
+/Assets/HoloWeldGenerated.meta
+/Assets/XR/
+/Assets/XR.meta
+*.csproj
+*.sln

@@ -5,7 +5,8 @@
   "scripts": {
     "test": "playwright test",
     "dev": "vite --host 127.0.0.1 --strictPort --port 4181",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "test:stage2": "playwright test --config playwright.stage2.config.ts"
   },
   "type": "module",
   "dependencies": {
