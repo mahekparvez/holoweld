@@ -1,0 +1,95 @@
+import {test,expect,type Page} from '@playwright/test';
+import fs from 'node:fs/promises';
+
+async function ready(page:Page,path='/'){
+  await page.goto(path);
+  await expect(page.locator('.loading')).toHaveCount(0,{timeout:25000});
+}
+test('desktop cameras, joint and Cartesian motion, limits, collision and stop', async({page})=>{
+  const errors:string[]=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await ready(page);
+  await expect(page.getByRole('slider')).toHaveCount(5);
+  const joint=page.getByRole('slider').first();
+  const original=await joint.inputValue();
+  await joint.focus();await page.keyboard.press('ArrowRight');
+  await expect(joint).not.toHaveValue(original);
+  await page.getByRole('button',{name:'Home',exact:true}).click();
+  await expect(joint).toHaveValue(original);
+  const coords=page.locator('.viewportBottom span').last();
+  const initial=await coords.innerText();
+  await page.getByRole('button',{name:'X+',exact:true}).click();
+  await expect(coords).not.toHaveText(initial);
+  await page.getByRole('region',{name:'3D welding workstation'}).getByLabel('Simulation viewport').focus();
+  const beforeKeyboard=await coords.innerText();
+  await page.keyboard.press('ArrowRight');
+  await expect(coords).not.toHaveText(beforeKeyboard);
+  await page.getByRole('combobox',{name:'Cartesian target'}).selectOption('end');
+  await page.getByRole('button',{name:'Y+',exact:true}).click();
+  await page.getByRole('button',{name:'First person',exact:true}).click();
+  await expect(page.getByText('W A S D to walk')).toBeVisible();
+  await page.getByRole('button',{name:'Robot',exact:true}).first().click();
+  await expect(page.getByText('Wrist-mounted camera')).toBeVisible();
+  await page.getByRole('button',{name:'Orbit',exact:true}).click();
+  await page.getByRole('button',{name:'Reset cell'}).click();
+  await page.getByRole('combobox',{name:'Cartesian target'}).selectOption('tip');
+  await page.getByRole('button',{name:'Y-',exact:true}).click();
+  await page.getByRole('button',{name:'Y-',exact:true}).click();
+  await page.getByRole('button',{name:'Y-',exact:true}).click();
+  await expect(page.locator('.asideBottom [role=status]')).toContainText('collide');
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('E-stop active')).toBeVisible();
+  await expect(joint).toBeDisabled();
+  await page.getByRole('button',{name:'Reset cell'}).click();
+  await expect(page.getByText('Arc off')).toBeVisible();
+  expect(errors).toEqual([]);
+  await page.screenshot({path:'screenshots/desktop.png'});
+});
+
+test('straight pass, circular weave, repeatable cell reset and camera recording export',async({page})=>{
+  await ready(page);
+  await page.getByRole('button',{name:'Record',exact:true}).click();
+  await page.getByLabel('Include camera observations').check();
+  await page.getByRole('button',{name:'Start recording'}).click();
+  await page.getByRole('button',{name:'Weld',exact:true}).click();
+  await page.getByRole('button',{name:'Run straight pass'}).click();
+  await expect(page.getByText('Arc active')).toBeVisible();
+  const covered=page.getByTestId('coverage');
+  await expect.poll(async()=>parseInt(await covered.innerText()),{timeout:10000}).toBeGreaterThanOrEqual(12);
+  await page.screenshot({path:'screenshots/active-weld.png'});
+  await expect.poll(async()=>parseInt(await covered.innerText()),{timeout:24000}).toBeGreaterThanOrEqual(96);
+  await expect(page.getByText('Arc off')).toBeVisible({timeout:7000});
+  await page.screenshot({path:'screenshots/completed-pass.png'});
+  await page.getByRole('button',{name:'Record',exact:true}).click();
+  await page.getByRole('button',{name:'Stop recording'}).click();
+  const save=page.waitForEvent('download');
+  await page.getByRole('button',{name:'Export JSON'}).click();
+  const download=await save;
+  const data=JSON.parse(await fs.readFile((await download.path())!,'utf8'));
+  expect(data.schema).toBe('holoweld.demonstration.v1');
+  expect(data.camera.length).toBeGreaterThan(2);
+  expect(data.events.some((event:{source:string})=>event.source==='Straight pass')).toBeTruthy();
+  expect(data.samples.some((s:{arc:boolean})=>s.arc)).toBeTruthy();
+  expect(data.bead.length).toBeGreaterThan(60);
+  expect(data.seamAudit.filter((bin:string)=>bin==='deposited')).toHaveLength(57);
+  expect(data.summary.seamCoverage).toBeGreaterThanOrEqual(.96);
+  console.log('Straight:',data.summary,'samples',data.samples.length,'camera frames',data.camera.length);
+  await page.getByRole('button',{name:'Reset cell'}).click();
+  await expect(covered).toHaveText('0%');
+  await page.getByRole('button',{name:'Weld',exact:true}).click();
+  await page.getByRole('button',{name:'Run circular weave'}).click();
+  await expect(page.getByText('Arc active')).toBeVisible();
+  await expect.poll(async()=>parseInt(await covered.innerText()),{timeout:25000}).toBeGreaterThanOrEqual(94);
+  await expect(page.getByText('Arc off')).toBeVisible({timeout:8000});
+  console.log('Weave:',await covered.innerText());
+  await page.screenshot({path:'screenshots/completed-weave.png'});
+});
+
+test('seam audit distinguishes an armed stationary visit from deposition',async({page})=>{
+  await ready(page);
+  await page.getByRole('button',{name:'Weld',exact:true}).click();
+  await page.getByRole('button',{name:'Arm manual arc'}).click();
+  await expect(page.getByRole('img',{name:/0 deposited bins, 1 visited/})).toBeVisible();
+  await page.getByRole('button',{name:'Reset cell'}).click();
+  await expect(page.getByRole('img',{name:/0 deposited bins, 0 visited/})).toBeVisible();
+});

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+refs/
+test-results/
+playwright-report/
+.venv/
+.DS_Store
+*.pem
